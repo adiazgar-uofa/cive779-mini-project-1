@@ -206,6 +206,11 @@ svg.chart text.on-seg { fill: var(--k-on-seg); font-size: 12px; font-weight: 500
 .k-sub { font-family: var(--font-display); font-weight: 600; font-size: 19px; margin: 0; letter-spacing: .02em; }
 .k-block { display: grid; gap: 10px; min-width: 0; }
 .k-head { display: flex; justify-content: space-between; align-items: center; gap: 8px 16px; flex-wrap: wrap; }
+
+/* Credits / AI-use reference */
+.credits { border-top: 1px solid var(--line); padding-top: 16px; display: grid; gap: 6px; font-size: 13px; color: var(--muted); max-width: 90ch; }
+.credits p { margin: 0; }
+.credits .ref { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
 </style>
 
 <div class="wrap">
@@ -319,6 +324,11 @@ svg.chart text.on-seg { fill: var(--k-on-seg); font-size: 12px; font-weight: 500
     <p id="exp1"></p>
     <p id="exp2"></p>
   </section>
+  <footer class="credits" aria-label="Credits and AI-use statement">
+    <p>Developed by Amilcar Diaz (CCID: adiazgar) for CIV E 779 Structural Reliability, University of Alberta, Fall 2026.</p>
+    <p>This web app was created with the assistance of Claude, an AI assistant developed by Anthropic, which was used to write and debug the code and to refine the design. The probability concepts, the choice of scenario and the verification of results are the author's.</p>
+    <p class="ref">Reference: Anthropic. (2026). <i>Claude</i> [Large language model]. https://claude.ai</p>
+  </footer>
 </div>
 
 <script>
