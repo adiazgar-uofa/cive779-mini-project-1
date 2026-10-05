@@ -1,0 +1,1021 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<title>Damage by Region</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: input table by region on top (like an inspection sheet), results and charts below. */
+:root {
+  --bg: #eef1f3;        /* light steel grey */
+  --surface: #ffffff;
+  --ink: #1b2329;
+  --muted: #5a6772;
+  --line: #cfd6dc;
+  --ok: #9db4c8;        /* healthy elements */
+  --dmg: #b8402b;       /* damaged elements */
+  --prior: #a4aeb8;     /* P(R_i) before observing damage */
+  --post: #2f6f9f;      /* P(R_i | D) theoretical */
+  --sim: #c27a10;       /* simulated values */
+  --warn-bg: #fff4dc;
+  --font-display: "Barlow Condensed", "Arial Narrow", sans-serif;
+  --font-body: "Barlow", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12171b; --surface: #1b2228; --ink: #e6ebef; --muted: #93a1ac; --line: #2e3842;
+    --ok: #4d6478; --dmg: #ec6a55; --prior: #6b7783; --post: #6aa6d6; --sim: #f0a83a; --warn-bg: #2a2416; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12171b; --surface: #1b2228; --ink: #e6ebef; --muted: #93a1ac; --line: #2e3842;
+  --ok: #4d6478; --dmg: #ec6a55; --prior: #6b7783; --post: #6aa6d6; --sim: #f0a83a; --warn-bg: #2a2416; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.5; padding: 0 16px; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-block: 28px 48px; display: grid; gap: 24px; }
+
+header h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 5vw, 44px); line-height: 1.05; margin: 0; letter-spacing: .01em; text-wrap: balance; }
+header p { margin: 6px 0 0; color: var(--muted); max-width: 74ch; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 20px; display: grid; gap: 16px; min-width: 0; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 22px; letter-spacing: .02em; margin: 0; text-transform: uppercase; }
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 19px; margin: 0; letter-spacing: .02em; }
+
+/* n and N selectors */
+.setup { display: flex; flex-wrap: wrap; gap: 20px 40px; align-items: end; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.seg button { font-family: var(--font-mono); font-size: 15px; padding: 6px 14px; border: 0; background: var(--surface); color: var(--ink); cursor: pointer; border-right: 1px solid var(--line); }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+.lbl { font-weight: 600; font-size: 15px; display: block; margin-bottom: 6px; }
+.nfield { min-width: 260px; flex: 1; max-width: 420px; }
+.nfield .top { display: flex; justify-content: space-between; gap: 8px; }
+.val { font-family: var(--font-mono); font-size: 15px; font-variant-numeric: tabular-nums; }
+.hint { font-size: 13px; color: var(--muted); font-family: var(--font-mono); }
+input[type="range"] { width: 100%; accent-color: var(--post); }
+#N { accent-color: var(--sim); }
+
+/* Input sheet */
+.sheet { display: grid; gap: 0; }
+.sheet .row { display: grid; grid-template-columns: 150px minmax(0, 1fr) minmax(0, 1.4fr); gap: 16px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.sheet .row.head { border-top: 0; padding-top: 0; font-size: 13px; color: var(--muted); font-family: var(--font-mono); }
+.sheet .row.sum { font-family: var(--font-mono); font-size: 14px; }
+.reg { font-weight: 600; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.cell input[type="number"] { width: 84px; font-family: var(--font-mono); font-size: 15px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--ink); }
+.cell input[type="range"] { flex: 1; min-width: 0; }
+.auto-tag { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--post); border: 1px solid var(--post); border-radius: 3px; padding: 0 5px; }
+.autofill { display: grid; gap: 4px; max-width: 520px; }
+.autofill label { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; cursor: pointer; }
+.autofill input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--post); }
+.sum-ok { color: var(--post); }
+@media (max-width: 640px) {
+  .sheet .row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .sheet .row.head { display: none; }
+  .cell::before { content: attr(data-label); font-size: 12px; color: var(--muted); font-family: var(--font-mono); width: 70px; flex: none; }
+}
+.warn { background: var(--warn-bg); border: 1px solid var(--line); border-left: 4px solid var(--sim); border-radius: 4px; padding: 10px 14px; font-size: 14px; margin: 0; }
+.warn.err { border-left-color: var(--dmg); }
+
+/* Formula and result */
+.formula-grid { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 24px; align-items: center; }
+@media (max-width: 760px) { .formula-grid { grid-template-columns: minmax(0, 1fr); } }
+.math { overflow-x: auto; overflow-y: hidden; padding: 4px 0; min-width: 0; }
+.math mjx-container { margin: .4em 0 !important; }
+.big { display: grid; gap: 2px; }
+.big .lab { font-family: var(--font-mono); font-size: 14px; color: var(--muted); }
+.big .num { font-family: var(--font-display); font-weight: 700; font-size: clamp(52px, 8vw, 72px); line-height: 1; color: var(--dmg); font-variant-numeric: tabular-nums; }
+.big .sub { font-family: var(--font-mono); font-size: 14px; color: var(--muted); }
+
+/* Simulation */
+.simrow { display: grid; grid-template-columns: 220px repeat(3, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
+@media (max-width: 760px) { .simrow { grid-template-columns: repeat(2, minmax(0, 1fr)); } .simrow button { grid-column: 1 / -1; } }
+button#run { font-family: var(--font-display); font-weight: 700; font-size: 20px; letter-spacing: .06em; text-transform: uppercase; padding: 12px 16px; border-radius: 4px; cursor: pointer; background: var(--sim); color: #1b1408; border: 0; }
+button#run:hover { filter: brightness(1.07); }
+button:focus-visible, input:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+.stat { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; display: grid; gap: 2px; min-width: 0; }
+.stat .k { font-size: 13px; color: var(--muted); }
+.stat .v { font-family: var(--font-mono); font-size: 19px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.stat .v.sim { color: var(--sim); }
+.status { font-size: 14px; color: var(--muted); margin: 0; }
+.status.stale { color: var(--dmg); font-weight: 600; }
+
+/* Bayes table */
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 24px; align-items: start; }
+@media (max-width: 860px) { .two { grid-template-columns: minmax(0, 1fr); } }
+.tbl-box { overflow-x: auto; min-width: 0; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { padding: 7px 10px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-family: var(--font-mono); font-weight: 500; font-size: 12px; color: var(--muted); }
+td { font-family: var(--font-mono); font-size: 14px; }
+th:first-child, td:first-child { text-align: left; font-family: var(--font-body); font-weight: 600; }
+tfoot td { font-weight: 500; border-bottom: 0; }
+td.post { color: var(--post); }
+td.sim { color: var(--sim); }
+
+.chart-box { overflow-x: auto; min-width: 0; }
+svg.chart { width: 100%; min-width: 480px; height: auto; display: block; }
+svg.chart text { fill: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+svg.chart .xl { fill: var(--ink); font-family: var(--font-body); font-size: 13px; font-weight: 600; }
+svg.chart .grid { stroke: var(--line); }
+svg.chart .axis { stroke: var(--muted); }
+.b-ok { fill: var(--ok); } .b-dmg { fill: var(--dmg); } .b-prior { fill: var(--prior); } .b-post { fill: var(--post); } .b-sim { fill: var(--sim); }
+.legend { display: flex; gap: 16px; font-size: 14px; flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 11px; height: 11px; border-radius: 2px; display: inline-block; }
+.sw.ok { background: var(--ok); } .sw.dmg { background: var(--dmg); } .sw.prior { background: var(--prior); } .sw.post { background: var(--post); } .sw.sim { background: var(--sim); }
+.note { font-size: 13px; color: var(--muted); margin: 0; }
+
+.explain { background: var(--warn-bg); border: 1px solid var(--line); border-left: 4px solid var(--post); border-radius: 4px; padding: 16px 18px; display: grid; gap: 10px; max-width: 82ch; }
+.explain p { margin: 0; }
+.explain .num { font-family: var(--font-mono); font-size: .94em; }
+/* Copyable Python code block */
+.pycode { border: 1px solid var(--line); border-radius: 6px; background: var(--bg); min-width: 0; }
+.pycode summary { cursor: pointer; padding: 10px 14px; font-weight: 600; font-size: 15px; }
+.pycode summary:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+.pycode .pybar { display: flex; justify-content: space-between; align-items: center; gap: 8px 12px; padding: 0 14px 10px; flex-wrap: wrap; }
+.pycode .pybar span { font-size: 13px; color: var(--muted); }
+.pycode button.copy { font-family: var(--font-mono); font-size: 13px; padding: 5px 12px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); cursor: pointer; }
+.pycode button.copy:hover { border-color: var(--muted); }
+.pycode pre { margin: 0; padding: 12px 14px; overflow-x: auto; border-top: 1px solid var(--line); font-family: var(--font-mono); font-size: 13px; line-height: 1.55; color: var(--ink); tab-size: 4; }
+
+/* Shared chart styles (mosaic, composition bars, convergence) */
+:root {
+  --k-ok: #a9bfd1; --k-dmg: #b8402b; --k-on-dmg: #ffffff; --k-sim: #c27a10; --k-theory: #1b2329;
+  --k-c0: #2f6f9f; --k-c1: #2a9d8f; --k-c2: #7b5ea7; --k-c3: #c05c7e; --k-c4: #7a8b2f; --k-c5: #55707f; --k-on-seg: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --k-ok: #4d6478; --k-dmg: #ec6a55; --k-on-dmg: #1b1408; --k-sim: #f0a83a; --k-theory: #e6ebef;
+    --k-c0: #6aa6d6; --k-c1: #5cc2b5; --k-c2: #a98fd4; --k-c3: #e08aa6; --k-c4: #b2c25e; --k-c5: #8fa6b3; --k-on-seg: #12171b;
+  }
+}
+:root[data-theme="dark"] {
+  --k-ok: #4d6478; --k-dmg: #ec6a55; --k-on-dmg: #1b1408; --k-sim: #f0a83a; --k-theory: #e6ebef;
+  --k-c0: #6aa6d6; --k-c1: #5cc2b5; --k-c2: #a98fd4; --k-c3: #e08aa6; --k-c4: #b2c25e; --k-c5: #8fa6b3; --k-on-seg: #12171b;
+}
+svg.chart text.xl { fill: var(--ink); font-family: var(--font-body); font-size: 13px; font-weight: 600; }
+svg.chart .axis { stroke: var(--muted); stroke-width: 1; }
+svg.chart .grid { stroke: var(--line); stroke-width: 1; }
+svg.chart .b-ok { fill: var(--k-ok); }
+svg.chart .b-dmg { fill: var(--k-dmg); }
+svg.chart .cut { fill: none; stroke: var(--surface); stroke-width: 3; }
+svg.chart text.on-ok { fill: var(--ink); }
+svg.chart .b-total { fill: var(--k-dmg); opacity: .55; }
+svg.chart .b-total-post { fill: var(--post); opacity: .45; }
+.sw.tot { background: var(--k-dmg); opacity: .55; } .sw.tot-post { background: var(--post); opacity: .45; }
+.two-eq { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; align-items: start; }
+@media (max-width: 900px) { .two-eq { grid-template-columns: minmax(0, 1fr); } }
+.k-block .note { max-width: 70ch; }
+svg.chart text.on-dmg { fill: var(--k-on-dmg); font-weight: 500; }
+svg.chart text.lbl-strong { fill: var(--ink); }
+svg.chart text.lbl-sim { fill: var(--k-sim); font-weight: 500; }
+svg.chart .sim-line { stroke: var(--k-sim); stroke-width: 2.5; }
+svg.chart .sim-dot { fill: var(--k-sim); stroke: var(--surface); stroke-width: 1.5; }
+svg.chart .theory-line { stroke: var(--k-theory); stroke-width: 1.6; stroke-dasharray: 7 5; }
+svg.chart .theory-tick { stroke: var(--k-theory); stroke-width: 2; }
+svg.chart .conv-line { fill: none; stroke: var(--k-sim); stroke-width: 2; }
+svg.chart .conv-dot { fill: var(--k-sim); }
+svg.chart .seg.c0, svg.chart .band.c0 { fill: var(--k-c0); }
+svg.chart .seg.c1, svg.chart .band.c1 { fill: var(--k-c1); }
+svg.chart .seg.c2, svg.chart .band.c2 { fill: var(--k-c2); }
+svg.chart .seg.c3, svg.chart .band.c3 { fill: var(--k-c3); }
+svg.chart .seg.c4, svg.chart .band.c4 { fill: var(--k-c4); }
+svg.chart .seg.c5, svg.chart .band.c5 { fill: var(--k-c5); }
+svg.chart .band { opacity: .2; }
+svg.chart text.on-seg { fill: var(--k-on-seg); font-size: 12px; font-weight: 500; }
+.k-legend { display: flex; gap: 16px; font-size: 14px; flex-wrap: wrap; align-items: center; }
+.k-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.k-sw { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+.k-sw.ok { background: var(--k-ok); } .k-sw.dmg { background: var(--k-dmg); }
+.k-dia { width: 10px; height: 10px; background: var(--k-sim); transform: rotate(45deg); display: inline-block; margin: 0 2px; }
+.k-dash { width: 22px; border-top: 2px dashed var(--k-theory); display: inline-block; }
+.k-line { width: 22px; border-top: 3px solid var(--k-sim); display: inline-block; }
+.k-tick { width: 18px; border-top: 2px solid var(--k-theory); display: inline-block; }
+.k-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+.k-toggle input { width: 16px; height: 16px; accent-color: var(--k-dmg); }
+.k-sub { font-family: var(--font-display); font-weight: 600; font-size: 19px; margin: 0; letter-spacing: .02em; }
+.k-block { display: grid; gap: 10px; min-width: 0; }
+.k-head { display: flex; justify-content: space-between; align-items: center; gap: 8px 16px; flex-wrap: wrap; }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">CIV E 779 · Mini-project 1 · Total probability with n groups</p>
+    <h1>Where do damaged elements come from?</h1>
+    <p>An inspector checks bridges, beams and buildings that come from n regions, each with its own damage rate. The theorem of total probability gives the chance that a randomly chosen element is damaged; Bayes' theorem tells which region a damaged element most likely came from.</p>
+  </header>
+
+  <!-- ================= INPUTS ================= -->
+  <section class="panel" aria-labelledby="h-in">
+    <h2 id="h-in">Inspection sheet</h2>
+    <div class="setup">
+      <div>
+        <span class="lbl" id="n-lbl">n · number of regions</span>
+        <div class="seg" id="nseg" role="group" aria-labelledby="n-lbl"></div>
+      </div>
+      <div class="nfield">
+        <div class="top"><label class="lbl" for="N">N · elements to simulate</label><span class="val" id="N-val"></span></div>
+        <input type="range" id="N" min="3" max="6" step="0.01" value="5.3">
+        <span class="hint">Log scale: 1,000 to 1,000,000</span>
+      </div>
+      <div class="autofill">
+        <label for="autolast"><input type="checkbox" id="autolast" checked> Auto-fill the last region with 1 − (sum of the others)</label>
+        <span class="hint" id="autolast-hint"></span>
+      </div>
+    </div>
+    <div class="sheet" id="sheet"></div>
+    <p class="warn" id="warn" hidden></p>
+  </section>
+
+  <!-- ================= TOTAL PROBABILITY ================= -->
+  <section class="panel" aria-labelledby="h-tp">
+    <h2 id="h-tp">Theorem of total probability</h2>
+    <div class="formula-grid">
+      <div class="math" id="math-total"></div>
+      <div class="big">
+        <span class="lab">P(D) · theoretical</span>
+        <span class="num" id="big"></span>
+        <span class="sub" id="big-sub"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SIMULATION ================= -->
+  <section class="panel" aria-labelledby="h-sim">
+    <h2 id="h-sim">Simulation check</h2>
+    <div class="simrow">
+      <button id="run" type="button">Run simulation</button>
+      <div class="stat"><span class="k">Elements simulated</span><span class="v" id="s-n">—</span></div>
+      <div class="stat"><span class="k">Damaged</span><span class="v" id="s-d">—</span></div>
+      <div class="stat"><span class="k">P(D) simulated</span><span class="v sim" id="s-p">—</span></div>
+    </div>
+    <p class="status" id="status" role="status">Press “Run simulation” to generate elements and count damage.</p>
+    <div class="k-block">
+      <div class="k-head">
+        <h3 class="k-sub">Convergence: simulated P(D) as more elements are added</h3>
+        <div class="k-legend"><span><i class="k-line"></i>Simulated (running)</span><span><i class="k-dash"></i>Theory</span></div>
+      </div>
+      <div class="chart-box"><svg class="chart" id="chart-conv" viewBox="0 0 900 260" role="img" aria-label="Running simulated P(D) versus number of simulated elements"></svg></div>
+      <p class="note">Law of Large Numbers: with few elements the estimate jumps around; as more are simulated it settles on the theoretical value.</p>
+    </div>
+        <details class="pycode">
+          <summary>Python code for this simulation (copy into Jupyter)</summary>
+          <div class="pybar"><span>Uses the current slider values. Requires numpy and matplotlib.</span><button type="button" class="copy" id="copy-py">Copy code</button></div>
+          <pre><code id="py"></code></pre>
+        </details>
+  </section>
+
+  <!-- ================= BAYES ================= -->
+  <section class="panel" aria-labelledby="h-bayes">
+    <h2 id="h-bayes">From total probability to Bayes</h2>
+    <div class="math" id="math-bayes"></div>
+    <div class="two-eq">
+      <div class="k-block">
+        <h3 class="k-sub">1 · Total probability: P(D ∩ Rᵢ) and P(D)</h3>
+        <div class="k-legend"><span><i class="sw dmg"></i>Theory: P(D | Rᵢ)·P(Rᵢ)</span><span><i class="sw tot"></i>P(D), sum of the bars</span><span id="leg-a-sim" hidden><i class="k-dia"></i>Simulated</span></div>
+        <div class="chart-box"><svg class="chart" id="chart-a" viewBox="0 0 560 280" role="img" aria-label="Probability that an element is damaged and comes from each region, and their sum P(D)"></svg></div>
+        <p class="note">Each bar is the probability that an element is damaged <b>and</b> comes from region i: P(D ∩ Rᵢ) = P(D | Rᵢ)·P(Rᵢ). These are the red areas of the mosaic below. Added together they give P(D), the last bar. Simulated value = damaged elements from region i ÷ N.</p>
+      </div>
+      <div class="k-block">
+        <h3 class="k-sub">2 · Bayes: P(Rᵢ | D)</h3>
+        <div class="k-legend"><span><i class="sw post"></i>Theory: P(D ∩ Rᵢ) / P(D)</span><span><i class="sw tot-post"></i>Sum = 1</span><span id="leg-b-sim" hidden><i class="k-dia"></i>Simulated</span></div>
+        <div class="chart-box"><svg class="chart" id="chart-b" viewBox="0 0 560 280" role="img" aria-label="Probability that a damaged element came from each region"></svg></div>
+        <p class="note">Probability that a damaged element came from region i. Each bar is the matching bar of chart 1 divided by P(D), so these always add up to 1. Simulated value = damaged elements from region i ÷ all damaged elements.</p>
+      </div>
+    </div>
+    <div class="tbl-box">
+      <table id="tbl"></table>
+      <p class="note" style="margin-top:8px">Column P(D∩Rᵢ) adds up to P(D). Column P(Rᵢ|D) adds up to 1.</p>
+    </div>
+  </section>
+
+  <!-- ================= MOSAIC ================= -->
+  <section class="panel" aria-labelledby="h-stack">
+    <h2 id="h-stack">Total probability as an area</h2>
+    <div class="k-head">
+      <div class="k-legend">
+        <span><i class="k-sw ok"></i>Not damaged</span>
+        <span><i class="k-sw dmg"></i>Damaged</span>
+        <span id="mosaic-sim-leg" hidden><i class="k-dia"></i>Simulated damage rate</span>
+      </div>
+      <label class="k-toggle"><input type="checkbox" id="zoom" checked> Zoom in on the damaged part</label>
+    </div>
+    <div class="chart-box"><svg class="chart" id="chart-m" viewBox="0 0 900 340" role="img" aria-label="Mosaic plot: column width is P(R_i), red height is P(D given R_i)"></svg></div>
+    <p class="note" id="mosaic-note"></p>
+  </section>
+
+  <section class="explain" aria-labelledby="h-exp">
+    <h3 id="h-exp">What is going on?</h3>
+    <p id="exp1"></p>
+    <p id="exp2"></p>
+  </section>
+</div>
+
+<script>
+window.MathJax = {
+  svg: { fontCache: "global" },
+  startup: { typeset: false, ready: () => { MathJax.startup.defaultReady(); MathJax.startup.promise.then(update); } }
+};
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-svg.js"></script>
+
+<script>
+// ---------------------------------------------------------------------
+// SHARED CHART HELPERS
+// Mosaic plot, composition bars and convergence chart, drawn as SVG.
+// Colors come from CSS variables so the charts follow light/dark mode.
+// ---------------------------------------------------------------------
+const CH = {
+  pct(x, d = 0) { return Number.isFinite(x) ? (100 * x).toFixed(d) + "%" : "—"; },
+  fix(x, d) { return Number.isFinite(x) ? x.toFixed(d) : "—"; },
+  // Checkpoints where the running estimate is recorded during a simulation
+  // (log-spaced, so the start and the end of the run are both visible).
+  checkpoints(N) {
+    const set = new Set(), steps = 160, hi = Math.log10(N);
+    for (let j = 0; j <= steps; j++) set.add(Math.max(1, Math.round(Math.pow(10, 1 + (hi - 1) * j / steps))));
+    set.add(N);
+    return [...set].filter((k) => k <= N).sort((a, b) => a - b);
+  }
+};
+
+// MOSAIC PLOT (theorem of total probability as an area)
+//   column width  = P(group i)          (widths add up to 1)
+//   red height    = P(D | group i)
+//   red area      = width × height = P(D ∩ group i)
+//   sum of red areas = P(D)
+// With zoom on, the vertical axis stops a little above the largest damage
+// rate, so the damaged part is visible; the healthy part is cut at the top.
+function drawMosaic(svg, o) {
+  const W = 900, H = 340, L = 60, R = 14, T = 28, B = 48, gap = 4;
+  const plotW = W - L - R, plotH = H - T - B;
+  const simVals = (o.sim || []).filter(Number.isFinite);
+  const maxRate = Math.max(0.001, ...o.rates, ...simVals);
+  const nice = [0.01, 0.02, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.8, 1];
+  const yTop = o.zoom ? (nice.find((v) => v >= maxRate * 1.3) || 1) : 1;
+  const Y = (v) => T + plotH * (1 - Math.min(v, yTop) / yTop);
+  const dec = yTop <= 0.05 ? 3 : 2;
+  let s = "";
+  for (let j = 0; j <= 5; j++) {
+    const v = (yTop * j) / 5;
+    s += `<line class="grid" x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}"/>`;
+    s += `<text x="${L - 8}" y="${Y(v) + 4}" text-anchor="end">${v.toFixed(dec)}</text>`;
+  }
+  s += `<text x="14" y="${T + plotH / 2}" transform="rotate(-90 14 ${T + plotH / 2})" text-anchor="middle">${o.yLabel}</text>`;
+  let x = L;
+  o.widths.forEach((wFrac, i) => {
+    const w = wFrac * plotW;
+    if (w <= 0) return;
+    const x0 = x + gap / 2, ww = Math.max(0, w - gap), cx = x0 + ww / 2;
+    const r = o.rates[i], yr = Y(r);
+    s += `<rect class="b-ok" x="${x0}" y="${T}" width="${ww}" height="${Math.max(0, yr - T)}"/>`;
+    s += `<rect class="b-dmg" x="${x0}" y="${yr}" width="${ww}" height="${Y(0) - yr}"/>`;
+    if (o.zoom && yTop < 1 && ww > 8) {
+      // zig-zag cut: the healthy part continues up to 1.0
+      let z = `M${x0},${T + 5}`; const teeth = Math.max(2, Math.round(ww / 12));
+      for (let k = 1; k <= teeth; k++) z += ` L${x0 + (ww * (k - 0.5)) / teeth},${T + (k % 2 ? 0 : 5)} L${x0 + (ww * k) / teeth},${T + 5}`;
+      s += `<path d="${z}" class="cut"/>`;
+    }
+    // value of the red area = P(D ∩ group i)  and of the healthy area = P(D' ∩ group i)
+    const joint = wFrac * r, healthy = wFrac * (1 - r);
+    const full = ww > 120;                       // room for "P(D∩R1) = 0.0100"
+    if (ww > 38) {
+      const labD = full ? `${o.jointLabel(i)} = ${CH.fix(joint, 4)}` : CH.fix(joint, 4);
+      const inside = Y(0) - yr > 22;
+      s += `<text class="${inside ? "on-dmg" : "lbl-strong"}" x="${cx}" y="${inside ? yr + 16 : yr - 6}" text-anchor="middle">${labD}</text>`;
+      const labH = full ? `${o.healthyLabel(i)} = ${CH.fix(healthy, 4)}` : CH.fix(healthy, 4);
+      // inside the healthy area: near the top when zoomed (the area is cut), centered otherwise
+      const yh = o.zoom && yTop < 1 ? T + 26 : (T + yr) / 2 + 4;
+      if (yr - T > 34) s += `<text class="on-ok" x="${cx}" y="${yh}" text-anchor="middle">${labH}</text>`;
+    }
+    // simulated damage rate inside this group (marker)
+    if (o.sim && Number.isFinite(o.sim[i])) {
+      const ys = Y(o.sim[i]), half = Math.min(ww * 0.38, 40);
+      s += `<line class="sim-line" x1="${cx - half}" x2="${cx + half}" y1="${ys}" y2="${ys}"/>`;
+      s += `<path class="sim-dot" d="M${cx},${ys - 6} L${cx + 6},${ys} L${cx},${ys + 6} L${cx - 6},${ys} Z"/>`;
+    }
+    s += `<text class="xl" x="${cx}" y="${H - B + 18}" text-anchor="middle">${ww > 64 ? `${o.labels[i]} · ${CH.pct(wFrac)}` : o.labels[i]}</text>`;
+    x += w;
+  });
+  s += `<line class="axis" x1="${L}" x2="${W - R}" y1="${Y(0)}" y2="${Y(0)}"/>`;
+  s += `<text x="${(L + W - R) / 2}" y="${H - 6}" text-anchor="middle">${o.xLabel}</text>`;
+  if (o.zoom && yTop < 1) s += `<text x="${W - R}" y="${T - 10}" text-anchor="end">Vertical axis zoomed to 0–${yTop.toFixed(dec)}; the healthy part continues up to 1</text>`;
+  svg.innerHTML = s;
+}
+
+// BAR CHART: one bar per region with the theoretical value, and a diamond
+// with the simulated value. If the diamond sits on the top edge of the bar,
+// theory and simulation agree.
+function drawTheorySim(svg, theory, simv, o) {
+  // Optional o.total = { label, theory, sim }: an extra bar at the right,
+  // separated by a dashed line, for the sum of the other bars.
+  const W = 560, H = 280, L = 54, R = 12, T = 22, B = 34;
+  const all = theory.concat(simv || [], o.total ? [o.total.theory, o.total.sim] : []).filter(Number.isFinite);
+  const top = Math.max(0.001, ...all);
+  const nice = [0.01, 0.02, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8, 1];
+  const yMax = nice.find((v) => v >= top * 1.12) || 1;
+  const dec = yMax <= 0.02 ? 4 : yMax <= 0.2 ? 3 : 2;   // enough decimals for the tick labels
+  const Y = (v) => T + (H - T - B) * (1 - Math.min(v, yMax) / yMax);
+  let s = "";
+  for (let j = 0; j <= 4; j++) {
+    const v = (yMax * j) / 4;
+    s += `<line class="grid" x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}"/>`;
+    s += `<text x="${L - 8}" y="${Y(v) + 4}" text-anchor="end">${v.toFixed(dec)}</text>`;
+  }
+  const bars = theory.map((v, i) => ({ v, sv: simv ? simv[i] : NaN, label: o.labels[i], cls: o.cls }));
+  if (o.total) bars.push({ v: o.total.theory, sv: o.total.sim, label: o.total.label, cls: o.total.cls, total: true });
+  const n = bars.length, g = (W - L - R) / n, bw = Math.min(54, g * 0.5);
+  bars.forEach((b, i) => {
+    const cx = L + g * (i + 0.5);
+    if (b.total) s += `<line class="grid" x1="${L + g * i}" x2="${L + g * i}" y1="${T}" y2="${H - B}" stroke-dasharray="4 4"/>`;
+    if (Number.isFinite(b.v)) {
+      s += `<rect class="${b.cls}" x="${cx - bw / 2}" y="${Y(b.v)}" width="${bw}" height="${Y(0) - Y(b.v)}"/>`;
+      s += `<text class="lbl-strong" x="${cx}" y="${Y(b.v) - 10}" text-anchor="middle">${CH.fix(b.v, o.valueDec || 3)}</text>`;
+    }
+    if (Number.isFinite(b.sv)) {
+      const ys = Y(b.sv);
+      s += `<path class="sim-dot" d="M${cx},${ys - 7} L${cx + 7},${ys} L${cx},${ys + 7} L${cx - 7},${ys} Z"/>`;
+    }
+    s += `<text class="xl" x="${cx}" y="${H - 10}" text-anchor="middle">${b.label}</text>`;
+  });
+  s += `<line class="axis" x1="${L}" x2="${W - R}" y1="${Y(0)}" y2="${Y(0)}"/>`;
+  svg.innerHTML = s;
+}
+
+// CONVERGENCE CHART: running simulated estimate vs number of simulated
+// items (log scale), with the theoretical value as a dashed line.
+// This is the Law of Large Numbers: the line settles on the theory.
+function drawConvergence(svg, trace, theory, o) {
+  const W = 900, H = 260, L = 66, R = 16, T = 16, B = 44;
+  const pts = (trace || []).filter((p) => Number.isFinite(p.v));
+  if (!pts.length || !Number.isFinite(theory)) {
+    svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle">${o.empty}</text>`;
+    return;
+  }
+  const N = trace[trace.length - 1].k;
+  const x0 = 1, x1 = Math.log10(N);
+  const X = (k) => L + (W - L - R) * (Math.log10(Math.max(k, 10)) - x0) / (x1 - x0);
+  const cut = Math.max(100, N / 1000);
+  const tail = pts.filter((p) => p.k >= cut).map((p) => p.v).concat([theory]);
+  let lo = Math.min(...tail), hi = Math.max(...tail);
+  const pad = (hi - lo) * 0.2 || Math.max(theory * 0.1, 0.002);
+  lo = Math.max(0, lo - pad); hi = Math.min(1, hi + pad);
+  const Y = (v) => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+  const span = hi - lo, dec = span < 0.01 ? 4 : span < 0.1 ? 3 : 2;
+  const id = "clip-" + svg.id;
+  const last = pts[pts.length - 1];
+  const above = last.v >= theory;
+  let s = `<defs><clipPath id="${id}"><rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}"/></clipPath></defs>`;
+  for (let j = 0; j <= 4; j++) {
+    const v = lo + (span * j) / 4;
+    s += `<line class="grid" x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}"/>`;
+    s += `<text x="${L - 8}" y="${Y(v) + 4}" text-anchor="end">${v.toFixed(dec)}</text>`;
+  }
+  for (let e = 1; Math.pow(10, e) <= N; e++) {
+    const k = Math.pow(10, e);
+    s += `<line class="grid" x1="${X(k)}" x2="${X(k)}" y1="${T}" y2="${H - B}"/>`;
+    s += `<text x="${X(k)}" y="${H - B + 16}" text-anchor="middle">${k.toLocaleString("en-US")}</text>`;
+  }
+  s += `<text x="${(L + W - R) / 2}" y="${H - 6}" text-anchor="middle">${o.xLabel}</text>`;
+  s += `<line class="theory-line" x1="${L}" x2="${W - R}" y1="${Y(theory)}" y2="${Y(theory)}"/>`;
+  const d = pts.map((p, j) => (j ? "L" : "M") + X(p.k).toFixed(1) + "," + Y(Math.min(hi, Math.max(lo, p.v))).toFixed(1)).join("");
+  s += `<path class="conv-line" d="${d}" clip-path="url(#${id})"/>`;
+  s += `<circle class="conv-dot" cx="${X(last.k)}" cy="${Y(last.v)}" r="4.5"/>`;
+  s += `<text class="lbl-strong" x="${L + 8}" y="${Y(theory) + (above ? 18 : -8)}">Theory ${theory.toFixed(dec + 1)}</text>`;
+  // simulated label on the opposite side of the theory line, so they do not overlap
+  const ly = above ? Math.min(Y(last.v), Y(theory)) - 10 : Math.max(Y(last.v), Y(theory)) + 18;
+  s += `<text class="lbl-sim" x="${X(last.k) - 8}" y="${Math.min(H - B - 4, Math.max(T + 12, ly))}" text-anchor="end">Simulated ${last.v.toFixed(dec + 1)}</text>`;
+  s += `<text x="12" y="${T + (H - T - B) / 2}" transform="rotate(-90 12 ${T + (H - T - B) / 2})" text-anchor="middle">${o.yLabel}</text>`;
+  svg.innerHTML = s;
+}
+
+/* =====================================================================
+   APP LOGIC
+   Events:   R_i = the element comes from region i   (i = 1..n)
+             D   = the element is damaged
+   {R_1, ..., R_n} is a PARTITION: each element comes from exactly ONE region.
+   ===================================================================== */
+
+const $ = (id) => document.getElementById(id);
+
+// ---------------------------------------------------------------------
+// 0) STATE: 6 rows are stored even if only n are shown, so a region that
+//    is removed and added back keeps its values.
+//    The default shares add up to 1 when n = 3.
+// ---------------------------------------------------------------------
+const state = {
+  n: 3,
+  prop: [0.50, 0.30, 0.20, 0.10, 0.10, 0.05],   // P(R_i) as typed by the user
+  rate: [0.02, 0.05, 0.12, 0.03, 0.20, 0.08],   // P(D | R_i)
+  autoLast: true                                 // last share = 1 − (sum of the others)
+};
+
+// ---------------------------------------------------------------------
+// AUTO-FILL OF THE LAST REGION (a typing aid, not a constraint)
+// If the option is on, every time the user changes regions 1 to n-1 the
+// last share is filled with P(R_n) = 1 − [P(R_1) + ... + P(R_{n-1})], so the
+// shares add up to 1 without doing the arithmetic. The last field stays
+// editable: if the user types another value there, it is kept, and if the
+// shares then do not add up to 1 the usual normalization (section 2a) applies.
+// If the other shares already add up to more than 1, P(R_n) is filled with 0.
+// ---------------------------------------------------------------------
+const clamp01 = (v) => Math.min(1, Math.max(0, Number.isFinite(v) ? v : 0));
+function applyAutoLast() {
+  if (!state.autoLast) return;
+  const last = state.n - 1;
+  let others = 0;
+  for (let i = 0; i < last; i++) others += state.prop[i];
+  state.prop[last] = +Math.max(0, 1 - others).toFixed(6);   // toFixed avoids 0.19999999
+  const num = document.getElementById(`prop-${last}`), rng = document.getElementById(`propr-${last}`);
+  if (num) num.value = +state.prop[last].toFixed(4);
+  if (rng) rng.value = state.prop[last];
+}
+
+// ---------------------------------------------------------------------
+// 1) DYNAMIC CONTROLS
+//    Buttons for n = 2..6 and one input row per region.
+// ---------------------------------------------------------------------
+function buildNSelector() {
+  let h = "";
+  for (let k = 2; k <= 6; k++) h += `<button type="button" data-n="${k}" aria-pressed="${k === state.n}">${k}</button>`;
+  $("nseg").innerHTML = h;
+  $("nseg").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+    state.n = parseInt(b.dataset.n, 10);
+    buildNSelector();
+    buildSheet();
+    applyAutoLast();
+    update();
+  }));
+}
+
+function buildSheet() {
+  let h = `<div class="row head"><span>Region</span><span>P(Rᵢ) · share of elements</span><span>P(D | Rᵢ) · damage rate</span></div>`;
+  for (let i = 0; i < state.n; i++) {
+    const auto = state.autoLast && i === state.n - 1;   // this row is auto-filled (still editable)
+    h += `<div class="row">
+      <span class="reg">Region ${i + 1}${auto ? ' <span class="auto-tag">auto-fill</span>' : ""}</span>
+      <span class="cell" data-label="P(R${i + 1})">
+        <input type="number" id="prop-${i}" min="0" max="1" step="any" inputmode="decimal" value="${+state.prop[i].toFixed(4)}" aria-label="P(R${i + 1})">
+        <input type="range" id="propr-${i}" min="0" max="1" step="0.01" value="${state.prop[i]}" aria-label="P(R${i + 1}) slider">
+      </span>
+      <span class="cell" data-label="P(D|R${i + 1})">
+        <input type="number" id="rate-num-${i}" min="0" max="1" step="any" inputmode="decimal" value="${state.rate[i]}" aria-label="P(D | R${i + 1}) value">
+        <input type="range" id="rate-${i}" min="0" max="1" step="0.005" value="${state.rate[i]}" aria-label="P(D | R${i + 1})">
+      </span>
+    </div>`;
+  }
+  h += `<div class="row sum"><span>Sum</span><span id="sumcell"></span><span></span></div>`;
+  $("sheet").innerHTML = h;
+
+  for (let i = 0; i < state.n; i++) {
+    // Each probability can be typed in the number field or set with the
+    // slider; both stay in sync. Typed values outside [0, 1] are clamped.
+    $(`prop-${i}`).addEventListener("input", (e) => {
+      state.prop[i] = clamp01(parseFloat(e.target.value));
+      $(`propr-${i}`).value = state.prop[i]; if (i !== state.n - 1) applyAutoLast(); schedule();
+    });
+    $(`prop-${i}`).addEventListener("change", (e) => { e.target.value = +state.prop[i].toFixed(4); });
+    $(`propr-${i}`).addEventListener("input", (e) => {
+      state.prop[i] = parseFloat(e.target.value); $(`prop-${i}`).value = state.prop[i]; if (i !== state.n - 1) applyAutoLast(); schedule();
+    });
+    $(`rate-num-${i}`).addEventListener("input", (e) => {
+      state.rate[i] = clamp01(parseFloat(e.target.value)); $(`rate-${i}`).value = state.rate[i]; schedule();
+    });
+    $(`rate-num-${i}`).addEventListener("change", (e) => { e.target.value = +state.rate[i].toFixed(4); });
+    $(`rate-${i}`).addEventListener("input", (e) => {
+      state.rate[i] = parseFloat(e.target.value); $(`rate-num-${i}`).value = state.rate[i]; schedule();
+    });
+  }
+}
+
+// ---------------------------------------------------------------------
+// 2) VALIDATION AND CALCULATION
+// ---------------------------------------------------------------------
+function compute() {
+  const n = state.n;
+  const raw = state.prop.slice(0, n);
+  const rates = state.rate.slice(0, n);
+
+  // 2a) The P(R_i) must add up to 1. If not, they are normalized: each / sum.
+  const sum = raw.reduce((a, b) => a + b, 0);
+  if (sum <= 0) return { n, sum, valid: false };
+  const props = raw.map((p) => p / sum);
+
+  // 2b) >>> THEOREM OF TOTAL PROBABILITY <<<
+  //     D = (D∩R_1) ∪ ... ∪ (D∩R_n), disjoint pieces, so
+  //     P(D) = Σ_i P(D ∩ R_i) = Σ_i P(D | R_i) · P(R_i)
+  //     Explicit loop: each pass computes one term and adds it up.
+  const joint = new Array(n);     // joint[i] = P(D ∩ R_i)
+  let pD = 0;                     // running sum
+  for (let i = 0; i < n; i++) {
+    joint[i] = rates[i] * props[i];   // term i: P(D|R_i)·P(R_i)
+    pD += joint[i];                   // P(D) += term i
+  }
+
+  // 2c) >>> BAYES' THEOREM FOR EACH REGION <<<
+  //     P(R_i | D) = P(D | R_i)·P(R_i) / P(D) = joint[i] / P(D)
+  //     Numerator = term i of the sum; denominator = the whole sum.
+  //     That is why the n posteriors always add up to 1.
+  const post = joint.map((j) => (pD > 0 ? j / pD : NaN));
+
+  return { n, sum, valid: true, props, rates, joint, pD, post };
+}
+
+// ---------------------------------------------------------------------
+// 3) SIMULATION
+//    For each element:
+//      step 1: pick a region with probabilities P(R_i) (cumulative method:
+//              find the first i with u < P(R_1)+...+P(R_i))
+//      step 2: damaged if u2 < P(D | R_i) of THAT region
+//    P(D) ≈ damaged / N ;  P(R_i | D) ≈ damaged from i / total damaged
+// ---------------------------------------------------------------------
+function simulate(N, props, rates) {
+  const n = props.length;
+  const cum = []; let c = 0;
+  for (let i = 0; i < n; i++) { c += props[i]; cum.push(c); }
+  cum[n - 1] = 1;                       // avoids rounding errors
+  const total = new Array(n).fill(0), dmg = new Array(n).fill(0);
+  // Running estimate of P(D) at log-spaced checkpoints (for the convergence chart)
+  const cps = CH.checkpoints(N), trace = [];
+  let nextCp = 0, dmgSoFar = 0;
+  for (let k = 0; k < N; k++) {
+    const u = Math.random();
+    let i = 0; while (u >= cum[i]) i++;
+    total[i]++;
+    if (Math.random() < rates[i]) { dmg[i]++; dmgSoFar++; }
+    if (k + 1 === cps[nextCp]) { trace.push({ k: k + 1, v: dmgSoFar / (k + 1) }); nextCp++; }
+  }
+  return { N, total, dmg, trace };
+}
+
+let sim = null;
+const keyOf = (r) => JSON.stringify([state.n, readN(), state.prop.slice(0, state.n), state.rate.slice(0, state.n)]);
+function readN() {
+  const n = Math.round(Math.pow(10, parseFloat($("N").value)) / 1000) * 1000;
+  return Math.min(1000000, Math.max(1000, n));
+}
+$("run").addEventListener("click", () => {
+  const r = compute();
+  if (!r.valid) return;
+  sim = { ...simulate(readN(), r.props, r.rates), key: keyOf(r) };
+  update();
+});
+$("N").addEventListener("input", () => schedule());
+$("zoom").addEventListener("change", () => schedule());
+
+// ---------------------------------------------------------------------
+// 4) DISPLAY
+// ---------------------------------------------------------------------
+const f = (x, d) => Number.isFinite(x) ? x.toFixed(d) : "—";
+const pct = (x, d = 1) => Number.isFinite(x) ? (100 * x).toFixed(d) + "%" : "—";
+const th = (x) => Math.round(x).toLocaleString("en-US");
+
+function typeset(ids) {
+  if (window.MathJax && MathJax.typesetPromise) {
+    const els = ids.map($);
+    MathJax.typesetClear(els);
+    MathJax.typesetPromise(els).catch(() => {});
+  }
+}
+
+function showFormulas(r) {
+  const prods = r.rates.map((q, i) => `(${f(q,3)})(${f(r.props[i],3)})`).join(" + ");
+  const terms = r.joint.map((j) => f(j, 5)).join(" + ");
+  $("math-total").innerHTML =
+    "\\[ P(D) = \\sum_{i=1}^{n} P(D \\mid R_i)\\,P(R_i) \\]" +
+    `\\[ P(D) = ${prods} \\]` +
+    `\\[ P(D) = ${terms} = \\mathbf{${f(r.pD,5)}} \\]`;
+  $("math-bayes").innerHTML =
+    "\\[ P(R_i \\mid D) = \\frac{P(D \\mid R_i)\\,P(R_i)}{P(D)} = \\frac{P(D \\mid R_i)\\,P(R_i)}{\\sum_{j=1}^{n} P(D \\mid R_j)\\,P(R_j)} \\]";
+  typeset(["math-total", "math-bayes"]);
+}
+
+function simCurrent(r) { return sim && sim.key === keyOf(r); }
+
+function showSim(r) {
+  if (simCurrent(r)) {
+    const nd = sim.dmg.reduce((a, b) => a + b, 0);
+    const fD = nd / sim.N;
+    $("s-n").textContent = th(sim.N);
+    $("s-d").textContent = th(nd);
+    $("s-p").textContent = f(fD, 5);
+    $("status").className = "status";
+    $("status").textContent = `Theory: ${f(r.pD, 5)}. Difference: ${(fD - r.pD >= 0 ? "+" : "−") + Math.abs(fD - r.pD).toFixed(5)}. ` +
+      "The simulated frequency approaches the theoretical value as N grows (Law of Large Numbers).";
+  } else {
+    ["s-n", "s-d", "s-p"].forEach((id) => $(id).textContent = "—");
+    $("status").className = sim ? "status stale" : "status";
+    $("status").textContent = sim ? "Inputs changed. Press “Run simulation” again to compare."
+                                  : "Press “Run simulation” to generate elements and count damage.";
+  }
+}
+
+function showTable(r) {
+  const cur = simCurrent(r);
+  const nd = cur ? sim.dmg.reduce((a, b) => a + b, 0) : 0;
+  let h = `<thead><tr><th>Region</th><th>P(Rᵢ)</th><th>P(D|Rᵢ)</th><th>P(D∩Rᵢ)</th><th>P(Rᵢ|D)</th>${cur ? "<th>P(Rᵢ|D) sim</th>" : ""}</tr></thead><tbody>`;
+  for (let i = 0; i < r.n; i++) {
+    h += `<tr><td>R${i + 1}</td><td>${f(r.props[i],4)}</td><td>${f(r.rates[i],3)}</td><td>${f(r.joint[i],5)}</td>` +
+         `<td class="post">${f(r.post[i],4)}</td>${cur ? `<td class="sim">${nd > 0 ? f(sim.dmg[i] / nd, 4) : "—"}</td>` : ""}</tr>`;
+  }
+  const sumPost = r.pD > 0 ? 1 : NaN;
+  h += `</tbody><tfoot><tr><td>Sum</td><td>${f(1,4)}</td><td></td><td>${f(r.pD,5)}</td><td class="post">${f(sumPost,4)}</td>${cur ? `<td class="sim">${nd > 0 ? f(1,4) : "—"}</td>` : ""}</tr></tfoot>`;
+  $("tbl").innerHTML = h;
+}
+
+function chartBayes(r) {
+  const cur = simCurrent(r);
+  const labels = r.props.map((_, i) => `R${i + 1}`);
+  const nd = cur ? sim.dmg.reduce((a, b) => a + b, 0) : 0;
+  // Chart 1 (TOTAL PROBABILITY): P(D ∩ R_i) = P(D | R_i)·P(R_i), and their sum P(D).
+  //   Simulated: damaged elements from region i / N, and all damaged / N.
+  const simJoint = cur ? sim.dmg.map((d) => d / sim.N) : null;
+  drawTheorySim($("chart-a"), r.joint, simJoint, {
+    cls: "b-dmg", labels, valueDec: 4,
+    total: { label: "P(D) = Σ", theory: r.pD, sim: cur ? nd / sim.N : NaN, cls: "b-total" }
+  });
+  $("leg-a-sim").hidden = !simJoint;
+  // Chart 2 (BAYES): P(R_i | D) = P(D ∩ R_i) / P(D), i.e. chart 1 divided by P(D).
+  //   Simulated: damaged from region i / all damaged.
+  const simPost = cur && nd > 0 ? sim.dmg.map((d) => d / nd) : null;
+  drawTheorySim($("chart-b"), r.pD > 0 ? r.post : r.props.map(() => NaN), simPost, {
+    cls: "b-post", labels, valueDec: 3,
+    total: { label: "Σ = 1", theory: r.pD > 0 ? 1 : NaN, sim: simPost ? 1 : NaN, cls: "b-total-post" }
+  });
+  $("leg-b-sim").hidden = !simPost;
+}
+
+function chartStack(r) {
+  // MOSAIC: width = P(R_i), red height = P(D | R_i), red area = P(D ∩ R_i).
+  const cur = simCurrent(r);
+  const simRates = cur ? sim.dmg.map((d, i) => (sim.total[i] > 0 ? d / sim.total[i] : NaN)) : null;
+  drawMosaic($("chart-m"), {
+    widths: r.props, rates: r.rates, sim: simRates,
+    labels: r.props.map((_, i) => `R${i + 1}`),
+    jointLabel: (i) => `P(D∩R${i + 1})`,
+    healthyLabel: (i) => `P(D′∩R${i + 1})`,
+    zoom: $("zoom").checked,
+    yLabel: "P(D | Rᵢ)", xLabel: "Column width = P(Rᵢ), share of all elements"
+  });
+  $("mosaic-sim-leg").hidden = !simRates;
+  $("mosaic-note").textContent =
+    `Each column is one region: its width is P(Rᵢ) and its red height is P(D | Rᵢ), so the red area is P(D | Rᵢ)·P(Rᵢ) = P(D ∩ Rᵢ) ` +
+    `and the blue-grey area above it is P(D′ | Rᵢ)·P(Rᵢ) = P(D′ ∩ Rᵢ), the not-damaged elements of that region. All the areas together add up to 1. ` +
+    `Adding only the red areas gives the theorem of total probability: P(D) = ${f(r.pD, 5)}.` +
+    (simRates ? " The diamonds mark the damage rate measured in each region by the simulation." : "");
+
+  // CONVERGENCE of the simulated P(D)
+  drawConvergence($("chart-conv"), cur ? sim.trace : null, r.pD, {
+    xLabel: "Number of simulated elements (log scale)", yLabel: "P(D)",
+    empty: "Run the simulation to see how the estimate converges."
+  });
+}
+
+function showExplanation(r) {
+  const min = Math.min(...r.rates), max = Math.max(...r.rates);
+  $("exp1").innerHTML =
+    `<b>Total probability.</b> Every element comes from exactly one of the ${r.n} regions, so the damaged elements can be split by region with no overlap and nothing left out. ` +
+    `The overall damage probability is a <b>weighted average</b> of the regional rates, each weighted by how many elements that region supplies: ` +
+    `P(D) = <b class="num">${pct(r.pD, 2)}</b>. It always lies between the lowest (<span class="num">${pct(min)}</span>) and the highest (<span class="num">${pct(max)}</span>) regional rate.`;
+  if (r.pD > 0) {
+    const iPost = r.post.indexOf(Math.max(...r.post));
+    const iRate = r.rates.indexOf(max);
+    $("exp2").innerHTML =
+      `<b>Bayes.</b> Region ${iPost + 1} is the most likely origin of a damaged element (P(R${iPost + 1} | D) = <b class="num">${pct(r.post[iPost])}</b>), ` +
+      (iPost === iRate
+        ? `and it is also the region with the highest damage rate (<span class="num">${pct(max)}</span>). `
+        : `even though the region with the highest damage rate is Region ${iRate + 1} (<span class="num">${pct(max)}</span>). `) +
+      `A region can dominate the damaged elements because it has a high rate, because it supplies many elements, or both: what matters is the product P(D | Rᵢ)·P(Rᵢ).`;
+  } else {
+    $("exp2").innerHTML = `<b>Bayes.</b> No region produces damage, so P(Rᵢ | D) is undefined: there is no damaged element to trace back.`;
+  }
+}
+
+
+// ---------------------------------------------------------------------
+// COPYABLE PYTHON CODE
+// Rebuilt from the current slider values, so the user can paste it into
+// Jupyter and get the same simulation.
+// ---------------------------------------------------------------------
+const pyNum = (n) => n.toLocaleString("en-US").replace(/,/g, "_");   // 100000 -> 100_000
+$("copy-py").addEventListener("click", async () => {
+  const btn = $("copy-py"), code = $("py");
+  const done = (msg) => { btn.textContent = msg; setTimeout(() => (btn.textContent = "Copy code"), 1800); };
+  try {
+    await navigator.clipboard.writeText(code.textContent);
+    done("Copied");
+  } catch (e) {
+    // Fallback if the browser blocks the clipboard: select the text
+    const range = document.createRange();
+    range.selectNodeContents(code);
+    const sel = window.getSelection();
+    sel.removeAllRanges(); sel.addRange(range);
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (_) {}
+    done(ok ? "Copied" : "Selected: press Ctrl+C");
+  }
+});
+
+function pyCode() {
+  const n = state.n;
+  const props = state.prop.slice(0, n).map((v) => +v.toFixed(4)).join(", ");
+  const rates = state.rate.slice(0, n).map((v) => v.toFixed(3)).join(", ");
+  return `import numpy as np
+import matplotlib.pyplot as plt
+
+# Parameters (current values from the app)
+P_R = np.array([${props}])          # P(R_i): share of elements from each region
+P_D_given_R = np.array([${rates}])  # P(D | R_i): damage rate in each region
+N = ${pyNum(readN())}                 # number of elements to simulate
+
+# The shares must add up to 1 (they form a partition), so normalize them
+P_R = P_R / P_R.sum()
+n_regions = len(P_R)
+
+rng = np.random.default_rng()
+
+# Step 1: assign each element to a region according to P(R_i)
+region = rng.choice(n_regions, size=N, p=P_R)
+
+# Step 2: mark it as damaged using the damage rate of its region
+damaged = rng.random(N) < P_D_given_R[region]
+
+# Step 3: count elements and damaged elements per region
+n_by_region = np.bincount(region, minlength=n_regions)
+n_damaged_by_region = np.bincount(region[damaged], minlength=n_regions)
+n_damaged = damaged.sum()
+
+# Simulated relative frequencies
+P_D_sim = n_damaged / N
+P_R_given_D_sim = n_damaged_by_region / n_damaged if n_damaged > 0 else np.full(n_regions, np.nan)
+
+# Theory: total probability and Bayes' theorem for each region
+joint = P_D_given_R * P_R           # P(D and R_i)
+P_D = joint.sum()                   # P(D) = sum of P(D | R_i) * P(R_i)
+P_R_given_D = joint / P_D if P_D > 0 else np.full(n_regions, np.nan)
+
+print(f"P(D): theory = {P_D:.5f}   simulated = {P_D_sim:.5f}")
+print("Region   P(R_i)   P(D|R_i)   P(R_i|D) theory   P(R_i|D) simulated")
+for i in range(n_regions):
+    print(f"R{i + 1:<7} {P_R[i]:.4f}   {P_D_given_R[i]:.3f}      {P_R_given_D[i]:.4f}            {P_R_given_D_sim[i]:.4f}")
+
+# ----------------------------- Plots -----------------------------
+labels = [f"R{i + 1}" for i in range(n_regions)]
+
+# Plot 1: convergence of the simulated P(D) (Law of Large Numbers)
+k = np.arange(1, N + 1)
+running_P_D = np.cumsum(damaged) / k
+fig, ax = plt.subplots(figsize=(9, 3.5))
+ax.plot(k, running_P_D, color="tab:orange", label="Simulated P(D) after k elements")
+ax.axhline(P_D, color="black", linestyle="--", label=f"Theory P(D) = {P_D:.5f}")
+ax.set_xscale("log")
+ax.set_xlim(10, N)
+ax.set_xlabel("Number of simulated elements k (log scale)")
+ax.set_ylabel("P(D)")
+ax.set_title("Convergence: the simulation settles on the theory")
+ax.legend()
+plt.tight_layout()
+plt.show()
+
+# Plot 2 (total probability): P(D and R_i) for each region, plus their sum P(D)
+# Theory: P(D | R_i) * P(R_i). Simulated: damaged elements from region i / N
+names = labels + ["P(D) = sum"]
+theory_vals = np.append(joint, P_D)
+sim_vals = np.append(n_damaged_by_region / N, P_D_sim)
+colors = ["tab:red"] * n_regions + ["lightcoral"]
+fig, ax = plt.subplots(figsize=(8, 4))
+ax.bar(names, theory_vals, color=colors, width=0.5, label="Theory: P(D | R_i) * P(R_i)")
+ax.scatter(names, sim_vals, marker="D", color="tab:orange", edgecolor="white", s=60, zorder=3, label="Simulated")
+for i, v in enumerate(theory_vals):
+    ax.annotate(f"{v:.4f}", (i, v), xytext=(0, 9), textcoords="offset points", ha="center", fontsize=9)
+ax.axvline(n_regions - 0.5, color="gray", linestyle=":")
+ax.set_ylim(0, theory_vals.max() * 1.25)
+ax.set_ylabel("Probability")
+ax.set_title("Total probability: P(D and R_i) for each region and their sum P(D)")
+ax.legend()
+plt.tight_layout()
+plt.show()
+
+# Plot 3 (Bayes): P(R_i | D) = P(D and R_i) / P(D), which always adds up to 1
+# Simulated: damaged elements from region i / all damaged elements
+names = labels + ["Sum = 1"]
+theory_vals = np.append(P_R_given_D, np.nansum(P_R_given_D))
+sim_vals = np.append(P_R_given_D_sim, np.nansum(P_R_given_D_sim))
+colors = ["tab:blue"] * n_regions + ["lightsteelblue"]
+fig, ax = plt.subplots(figsize=(8, 4))
+ax.bar(names, theory_vals, color=colors, width=0.5, label="Theory: P(D and R_i) / P(D)")
+ax.scatter(names, sim_vals, marker="D", color="tab:orange", edgecolor="white", s=60, zorder=3, label="Simulated")
+for i, v in enumerate(theory_vals):
+    ax.annotate(f"{v:.3f}", (i, v), xytext=(0, 9), textcoords="offset points", ha="center", fontsize=9)
+ax.axvline(n_regions - 0.5, color="gray", linestyle=":")
+ax.set_ylim(0, 1.15)
+ax.set_ylabel("Probability")
+ax.set_title("Bayes: probability that a damaged element came from each region")
+ax.legend()
+plt.tight_layout()
+plt.show()
+
+# Plot 4: mosaic, total probability as an area
+# Column width = P(R_i), red height = P(D | R_i), so red area = P(D and R_i)
+# and the area above it = P(D' and R_i). All areas add up to 1; red areas add up to P(D).
+zoom = True   # True: zoom in on the damaged part. False: full height from 0 to 1
+y_top = min(1.0, np.ceil(1.3 * max(P_D_given_R.max(), 0.01) * 20) / 20) if zoom else 1.0
+left = np.concatenate(([0.0], np.cumsum(P_R)[:-1]))
+sim_rate = np.divide(n_damaged_by_region, n_by_region,
+                     out=np.full(n_regions, np.nan), where=n_by_region > 0)
+fig, ax = plt.subplots(figsize=(9, 5))
+ax.bar(left, P_D_given_R, width=P_R, align="edge", color="tab:red", edgecolor="white",
+       label="Damaged: P(D and R_i)")
+ax.bar(left, 1 - P_D_given_R, width=P_R, bottom=P_D_given_R, align="edge", color="lightsteelblue",
+       edgecolor="white", label="Not damaged: P(D' and R_i)")
+ax.scatter(left + P_R / 2, sim_rate, marker="D", color="tab:orange", edgecolor="white", s=50,
+           zorder=3, label="Simulated damage rate")
+for i in range(n_regions):
+    if P_R[i] == 0:
+        continue
+    cx = left[i] + P_R[i] / 2
+    ax.text(cx, P_D_given_R[i] / 2, f"{joint[i]:.4f}", ha="center", va="center", fontsize=9, color="white")
+    healthy_y = 0.88 * y_top if zoom else (1 + P_D_given_R[i]) / 2
+    ax.text(cx, healthy_y, f"{P_R[i] * (1 - P_D_given_R[i]):.4f}", ha="center", va="center", fontsize=9)
+shown = P_R > 0   # regions with share 0 have no column
+ax.set_xticks((left + P_R / 2)[shown])
+ax.set_xticklabels([f"R{i + 1} ({P_R[i]:.0%})" for i in range(n_regions) if P_R[i] > 0])
+ax.set_xlim(0, 1)
+ax.set_ylim(0, y_top)
+ax.set_xlabel("Column width = P(R_i), share of all elements")
+ax.set_ylabel("P(D | R_i)" + ("   (zoomed)" if zoom else ""))
+ax.set_title(f"Total probability as an area: the red areas add up to P(D) = {P_D:.5f}")
+ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=3, fontsize=8, frameon=False)
+plt.tight_layout()
+plt.show()`;
+}
+
+// ---------------------------------------------------------------------
+// 5) UPDATE LOOP
+// ---------------------------------------------------------------------
+let pending = false;
+function schedule() {
+  if (pending) return;
+  pending = true;
+  requestAnimationFrame(() => { pending = false; update(); });
+}
+
+function update() {
+  $("N-val").textContent = th(readN());
+  const r = compute();
+  const sumOk = Math.abs(r.sum - 1) <= 1e-9;
+  $("sumcell").innerHTML = `Σ P(Rᵢ) = ${f(r.sum, 3)}` + (sumOk ? ' <span class="sum-ok">✓</span>' : "");
+  $("autolast-hint").textContent = state.autoLast
+    ? `When you change regions 1 to ${state.n - 1}, region ${state.n} is filled with 1 − (their sum). You can still type over it.`
+    : "Type every share freely. If they do not add up to 1, they are normalized.";
+  $("py").textContent = pyCode();
+
+  if (!r.valid) {
+    $("warn").hidden = false; $("warn").className = "warn err";
+    $("warn").textContent = "All region shares are 0. At least one P(Rᵢ) must be positive.";
+    return;
+  }
+  if (Math.abs(r.sum - 1) > 1e-9) {
+    $("warn").hidden = false; $("warn").className = "warn";
+    $("warn").textContent = `The shares P(Rᵢ) add up to ${f(r.sum, 3)}, not 1. ` +
+      (state.autoLast && r.sum > 1 && state.prop[state.n - 1] === 0 ? `Regions 1 to ${state.n - 1} already add up to more than 1, so region ${state.n} was filled with 0. ` : "") +
+      "They were normalized (each divided by the sum) and the app uses: " +
+      r.props.map((p, i) => `P(R${i + 1}) = ${f(p, 4)}`).join(", ") + ".";
+  } else {
+    $("warn").hidden = true;
+  }
+
+  $("big").textContent = pct(r.pD, 2);
+  $("big-sub").textContent = `= ${f(r.pD, 5)}`;
+  showFormulas(r);
+  showSim(r);
+  showTable(r);
+  chartBayes(r);
+  chartStack(r);
+  showExplanation(r);
+}
+
+$("autolast").addEventListener("change", (e) => {
+  state.autoLast = e.target.checked;
+  buildSheet();
+  applyAutoLast();
+  update();
+});
+
+buildNSelector();
+buildSheet();
+applyAutoLast();
+update();
+</script>
+
+</body>
+</html>
